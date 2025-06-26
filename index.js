@@ -1,7 +1,11 @@
 import express from "express";
 import axios from "axios";
+import cors from "cors";
+import helmet from "helmet";
 
 const app = express();
+app.use(cors());
+app.use(helmet());
 app.use(express.json());
 
 // see readme.md for env vars
@@ -55,7 +59,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const text = update.message.text;
 
     // test it
-    await sendNotification(chatId, `📩 Received: ${text}`);
+    const result = await sendNotification(chatId, `📩 Received: ${text}`);
     res.json(result);
   }
 });
