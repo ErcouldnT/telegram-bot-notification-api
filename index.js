@@ -15,6 +15,8 @@ const ERKUT_API_KEY = process.env.ERKUT_API_KEY;
 const SECRET_TOKEN = process.env.SECRET_TOKEN;
 const WEBHOOK_PATH = process.env.WEBHOOK_PATH || "webhook";
 
+let threadId = null; // to store the thread ID for the next request
+
 // notify function
 async function sendNotification(chatId, text) {
   try {
@@ -59,8 +61,6 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const text = update.message.text;
 
     // test it
-    let threadId = null;
-
     try {
       const payload = {
         prompt: text,
@@ -78,7 +78,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         { headers: { "ERKUT-API-KEY": ERKUT_API_KEY } }
       );
       const result = await sendNotification(chatId, apiRes.data.response);
-      threadId = apiRes.data.options.threadId;
+      threadId = apiRes.data.threadId;
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: error.message });
