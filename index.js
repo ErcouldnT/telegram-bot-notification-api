@@ -63,7 +63,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
       const response = await axios.post(
         "https://gpt.erkut.dev/api/prompt",
         { text },
-        { headers: { ERKUT_API_KEY } }
+        { headers: { "ERKUT-API-KEY": ERKUT_API_KEY } }
       );
       const result = await sendNotification(chatId, response.data);
       res.json(result);
