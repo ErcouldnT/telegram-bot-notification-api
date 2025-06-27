@@ -59,8 +59,17 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const text = update.message.text;
 
     // test it
-    const result = await sendNotification(chatId, `📩 Received: ${text}`);
-    res.json(result);
+    try {
+      const response = await axios.post(
+        "https://gpt.erkut.dev/api/prompt",
+        { text },
+        { headers: { ERKUT_API_KEY } }
+      );
+      const result = await sendNotification(chatId, response.data);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 
