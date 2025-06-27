@@ -78,7 +78,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         { headers: { "ERKUT-API-KEY": ERKUT_API_KEY } }
       );
       const result = await sendNotification(chatId, apiRes.data.response);
-      threadId = apiRes.data.threadId;
+      threadId = apiRes.data.options.threadId;
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: error.message });
