@@ -122,7 +122,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
       // max queue length is 3 for each thread
       const queueLength = threadQueueLengths.get(threadId) || 0;
       if (queueLength >= 3) {
-        await sendNotification(chatId, "There are too many requests for this chat. Please wait for previous operations to complete before sending new messages 👹");
+        await sendNotification(chatId, "There are too many requests from you. Please wait for previous operations to complete before sending new messages 👹");
         return;
       }
       const prev = threadQueues.get(threadId) || Promise.resolve();
