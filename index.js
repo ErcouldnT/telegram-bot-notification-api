@@ -27,6 +27,8 @@ const GPT_BASE_URL
 
 // stores chatId ➜ threadId pairs across requests
 const chatThreads = new Map();
+// stores threadId ➜ promise chain for sequential processing
+const threadQueues = new Map();
 
 // notify function
 async function sendNotification(chatId, text) {
@@ -77,30 +79,46 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     // retrieve existing threadId for this chat if we have one
     const threadId = chatThreads.get(chatId);
 
-    try {
-      const payload = {
-        prompt: text,
-        options: {
-          reason: false,
-          search: true,
-        },
-      };
-
-      // if this chat has a previous thread, include it
-      if (threadId) {
-        payload.options.threadId = threadId;
+    // function to handle the actual processing logic
+    const processRequest = async () => {
+      try {
+        const payload = {
+          prompt: text,
+          options: {
+            reason: false,
+            search: true,
+          },
+        };
+        // if this chat has a previous thread, include it
+        if (threadId) {
+          payload.options.threadId = threadId;
+        }
+        const apiRes = await axios.post(`${GPT_BASE_URL}/api/prompt`, payload, {
+          headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
+        });
+        // cache the latest threadId for this chat
+        chatThreads.set(chatId, apiRes.data.threadId);
+        await sendNotification(chatId, apiRes.data.response);
       }
-      const apiRes = await axios.post(`${GPT_BASE_URL}/api/prompt`, payload, {
-        headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
-      });
+      catch (error) {
+        console.warn("Webhook processRequest error:", error);
+      }
+    };
 
-      // cache the latest threadId for this chat
-      chatThreads.set(chatId, apiRes.data.threadId);
-      const result = await sendNotification(chatId, apiRes.data.response);
-      res.json(result);
+    // If threadId exists, queue the request for that thread
+    if (threadId) {
+      const prev = threadQueues.get(threadId) || Promise.resolve();
+      const next = prev.then(() => processRequest()).finally(() => {
+        // Remove the queue if this was the last job
+        if (threadQueues.get(threadId) === next) {
+          threadQueues.delete(threadId);
+        }
+      });
+      threadQueues.set(threadId, next);
     }
-    catch (error) {
-      res.status(500).json({ error: error.message });
+    else {
+      // No threadId, just process immediately
+      processRequest();
     }
   }
 });
