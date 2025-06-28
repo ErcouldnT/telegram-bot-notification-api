@@ -29,6 +29,8 @@ const GPT_BASE_URL
 const chatThreads = new Map();
 // stores threadId ➜ promise chain for sequential processing
 const threadQueues = new Map();
+// queue for active chats in webhook
+const activeChats = new Set();
 
 // notify function
 async function sendNotification(chatId, text) {
@@ -76,6 +78,15 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const chatId = update.message.chat.id;
     const text = update.message.text;
 
+    // add chatId to active chats if not already present
+    activeChats.add(chatId);
+
+    let queueMsg = `There are currently ${activeChats.size} people using this app at the moment.`;
+    if (activeChats.size > 5) {
+      queueMsg += " Since there are more than 5 users, my response may be slightly delayed.";
+    }
+    await sendNotification(chatId, queueMsg);
+
     // retrieve existing threadId for this chat if we have one
     const threadId = chatThreads.get(chatId);
 
@@ -86,7 +97,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
           prompt: text,
           options: {
             reason: false,
-            search: true,
+            search: false,
           },
         };
         // if this chat has a previous thread, include it
@@ -112,6 +123,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         // Remove the queue if this was the last job
         if (threadQueues.get(threadId) === next) {
           threadQueues.delete(threadId);
+          activeChats.delete(chatId);
         }
       });
       threadQueues.set(threadId, next);
