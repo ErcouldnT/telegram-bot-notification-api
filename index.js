@@ -25,7 +25,8 @@ const GPT_BASE_URL
     ? "http://localhost:3001"
     : "https://gpt.erkut.dev";
 
-let threadId = null; // to store the thread ID for the next request
+// stores chatId ➜ threadId pairs across requests
+const chatThreads = new Map();
 
 // notify function
 async function sendNotification(chatId, text) {
@@ -73,7 +74,9 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const chatId = update.message.chat.id;
     const text = update.message.text;
 
-    // test it
+    // retrieve existing threadId for this chat if we have one
+    const threadId = chatThreads.get(chatId);
+
     try {
       const payload = {
         prompt: text,
@@ -82,14 +85,18 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
           search: true,
         },
       };
+
+      // if this chat has a previous thread, include it
       if (threadId) {
         payload.options.threadId = threadId;
       }
       const apiRes = await axios.post(`${GPT_BASE_URL}/api/prompt`, payload, {
         headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
       });
+
+      // cache the latest threadId for this chat
+      chatThreads.set(chatId, apiRes.data.threadId);
       const result = await sendNotification(chatId, apiRes.data.response);
-      threadId = apiRes.data.threadId;
       res.json(result);
     }
     catch (error) {
