@@ -1,9 +1,11 @@
-dotenv.config();
-import express from "express";
+import process from "node:process";
 import axios from "axios";
 import cors from "cors";
-import helmet from "helmet";
 import dotenv from "dotenv";
+import express from "express";
+import helmet from "helmet";
+
+dotenv.config();
 
 const app = express();
 app.use(cors());
@@ -17,6 +19,12 @@ const ERKUT_API_KEY = process.env.ERKUT_API_KEY;
 const SECRET_TOKEN = process.env.SECRET_TOKEN;
 const WEBHOOK_PATH = process.env.WEBHOOK_PATH || "webhook";
 
+// choose GPT endpoint based on environment
+const GPT_BASE_URL
+  = process.env.NODE_ENV === "development"
+    ? "http://localhost:3001"
+    : "https://gpt.erkut.dev";
+
 let threadId = null; // to store the thread ID for the next request
 
 // notify function
@@ -27,7 +35,8 @@ async function sendNotification(chatId, text) {
       text,
     });
     return { ok: true };
-  } catch (e) {
+  }
+  catch (e) {
     return { error: e.message };
   }
 }
@@ -44,7 +53,8 @@ function verifyApiKey(req, res, next) {
 // notify endpoint
 app.post("/notify", verifyApiKey, async (req, res) => {
   const { text } = req.body;
-  if (!text) return res.status(400).json({ error: "text not found" });
+  if (!text)
+    return res.status(400).json({ error: "text not found" });
 
   const result = await sendNotification(CHAT_ID, text);
   res.json(result);
@@ -53,7 +63,8 @@ app.post("/notify", verifyApiKey, async (req, res) => {
 // telegram webhook
 app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
   const sig = req.header("X-Telegram-Bot-Api-Secret-Token");
-  if (sig !== SECRET_TOKEN) return res.sendStatus(403);
+  if (sig !== SECRET_TOKEN)
+    return res.sendStatus(403);
   res.sendStatus(200); // respond to telegram that we received the update
 
   // then your webhook logic...
@@ -74,15 +85,14 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
       if (threadId) {
         payload.options.threadId = threadId;
       }
-      const apiRes = await axios.post(
-        "https://gpt.erkut.dev/api/prompt",
-        payload,
-        { headers: { "ERKUT-API-KEY": ERKUT_API_KEY } }
-      );
+      const apiRes = await axios.post(`${GPT_BASE_URL}/api/prompt`, payload, {
+        headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
+      });
       const result = await sendNotification(chatId, apiRes.data.response);
       threadId = apiRes.data.threadId;
       res.json(result);
-    } catch (error) {
+    }
+    catch (error) {
       res.status(500).json({ error: error.message });
     }
   }
@@ -94,6 +104,6 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Notify + Webhook server is online!`);
-  console.log(`🌐 Listening on: http://localhost:${PORT}/`);
+  console.warn(`🚀 Notify + Webhook server is online!`);
+  console.warn(`🌐 Listening on: http://localhost:${PORT}/`);
 });

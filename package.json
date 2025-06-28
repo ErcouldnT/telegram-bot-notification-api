@@ -1,11 +1,13 @@
 {
   "name": "telegram-bot-notification-api",
+  "type": "module",
   "version": "1.0.0",
   "description": "A simple API to send notification to Telegram chats using a bot.",
-  "type": "module",
   "scripts": {
     "dev": "nodemon index.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "lint": "eslint",
+    "format": "eslint --fix"
   },
   "dependencies": {
     "axios": "^1.10.0",
@@ -15,6 +17,8 @@
     "helmet": "^8.1.0"
   },
   "devDependencies": {
+    "@antfu/eslint-config": "^4.16.1",
+    "eslint": "^9.30.0",
     "nodemon": "^3.1.10"
   }
 }
