@@ -29,6 +29,8 @@ const GPT_BASE_URL
 const chatThreads = new Map();
 // stores threadId ➜ promise chain for sequential processing
 const threadQueues = new Map();
+// stores threadId ➜ queue length
+const threadQueueLengths = new Map();
 // queue for active chats in webhook
 const activeChats = new Set();
 
@@ -81,11 +83,10 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     // add chatId to active chats if not already present
     activeChats.add(chatId);
 
-    let queueMsg = `There are currently ${activeChats.size} people using this app at the moment.`;
-    if (activeChats.size > 5) {
-      queueMsg += " Since there are more than 5 users, my response may be slightly delayed.";
+    if (activeChats.size >= 3) {
+      const queueMsg = `There are currently ${activeChats.size} people using this app at the moment. Since there are more users, my response may be slightly delayed. Be patient, I will respond as soon as possible 🙂`;
+      await sendNotification(chatId, queueMsg);
     }
-    await sendNotification(chatId, queueMsg);
 
     // retrieve existing threadId for this chat if we have one
     const threadId = chatThreads.get(chatId);
@@ -116,10 +117,25 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
       }
     };
 
-    // If threadId exists, queue the request for that thread
+    // if threadId exists, queue the request for that thread
     if (threadId) {
+      // max queue length is 3 for each thread
+      const queueLength = threadQueueLengths.get(threadId) || 0;
+      if (queueLength >= 3) {
+        await sendNotification(chatId, "There are too many requests for this chat. Please wait for previous operations to complete before sending new messages 👹");
+        return;
+      }
       const prev = threadQueues.get(threadId) || Promise.resolve();
+      threadQueueLengths.set(threadId, queueLength + 1);
       const next = prev.then(() => processRequest()).finally(() => {
+        // when the job is done, remove it from the queue
+        const currentLength = threadQueueLengths.get(threadId) || 1;
+        if (currentLength <= 1) {
+          threadQueueLengths.delete(threadId);
+        }
+        else {
+          threadQueueLengths.set(threadId, currentLength - 1);
+        }
         // Remove the queue if this was the last job
         if (threadQueues.get(threadId) === next) {
           threadQueues.delete(threadId);
