@@ -1,7 +1,9 @@
+dotenv.config();
 import express from "express";
 import axios from "axios";
 import cors from "cors";
 import helmet from "helmet";
+import dotenv from "dotenv";
 
 const app = express();
 app.use(cors());
@@ -84,6 +86,10 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
       res.status(500).json({ error: error.message });
     }
   }
+});
+
+app.get("/", (req, res) => {
+  res.send("<html><body><h1>Server is up and running...</h1></body></html>");
 });
 
 const PORT = process.env.PORT || 3000;
