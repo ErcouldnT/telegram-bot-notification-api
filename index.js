@@ -97,6 +97,8 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const processRequest = async () => {
       try {
         const payload = {
+          // systemPrompt: "Respond using only and only plain text—no formatting, no tables, no images, no formulas, no links, no markdown, no HTML. Just pure plain text. Exclude all sources and links mentioned anywhere in the response.",
+          systemPrompt: "Prompt'uma vereceğin cevabı sadece Telegram HTML Parser ile işleyebilecek şekilde ver.",
           prompt: text,
           options: {
             reason: false,
