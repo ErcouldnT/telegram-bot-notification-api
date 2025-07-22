@@ -82,12 +82,6 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const chatId = update.message.chat.id;
     const text = update.message.text;
 
-    const progressMessageRes = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      chat_id: chatId,
-      text: "In progress... 🧑🏻‍💻",
-    });
-    const progressMessageId = progressMessageRes.data.result.message_id;
-
     // add chatId to active chats if not already present
     activeChats.add(chatId);
 
@@ -102,6 +96,12 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     // function to handle the actual processing logic
     const processRequest = async () => {
       try {
+        const progressMessageRes = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          chat_id: chatId,
+          text: "In process... 🧑🏻‍💻",
+        });
+        const progressMessageId = progressMessageRes.data.result.message_id;
+
         const payload = {
           // systemPrompt: "Respond using only and only plain text—no formatting, no tables, no images, no formulas, no links, no markdown, no HTML. Just pure plain text. Exclude all sources and links mentioned anywhere in the response.",
           systemPrompt: "Prompt'uma vereceğin cevabı sadece Telegram HTML Parser ile işleyebilecek şekilde ver.",
@@ -121,15 +121,11 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         // cache the latest threadId for this chat
         chatThreads.set(chatId, apiRes.data.threadId);
         await sendNotification(chatId, apiRes.data.response);
-        try {
-          await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage`, {
-            chat_id: chatId,
-            message_id: progressMessageId,
-          });
-        }
-        catch (e) {
-          console.warn("Failed to delete progress message:", e.message);
-        }
+
+        await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage`, {
+          chat_id: chatId,
+          message_id: progressMessageId,
+        });
       }
       catch (error) {
         console.warn("Webhook processRequest error:", error);
@@ -144,6 +140,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         await sendNotification(chatId, "There are too many requests from you. Please wait for previous operations to complete before sending new messages 👹");
         return;
       }
+
       const prev = threadQueues.get(threadId) || Promise.resolve();
       threadQueueLengths.set(threadId, queueLength + 1);
       const next = prev.then(() => processRequest()).finally(() => {
