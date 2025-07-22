@@ -120,10 +120,10 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         // cache the latest threadId for this chat
         chatThreads.set(chatId, apiRes.data.threadId);
 
-        console.warn(apiRes.data);
-
         const telegramMaxLength = 4096;
         const fullResponse = apiRes.data.response;
+        console.warn(fullResponse.slice(0, 100), "...");
+
         for (let i = 0; i < fullResponse.length; i += telegramMaxLength) {
           const chunk = fullResponse.slice(i, i + telegramMaxLength);
           await sendNotification(chatId, chunk);
