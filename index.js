@@ -37,13 +37,13 @@ const activeChats = new Set();
 // notify function
 async function sendNotification(chatId, text) {
   try {
-    await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    const res = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
       text,
       parse_mode: "HTML",
       disable_web_page_preview: false,
     });
-    return { ok: true };
+    return { ok: true, data: res.data.result };
   }
   catch (e) {
     return { error: e.message };
@@ -82,6 +82,12 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const chatId = update.message.chat.id;
     const text = update.message.text;
 
+    const progressMessageRes = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      chat_id: chatId,
+      text: "In progress... 🧑🏻‍💻",
+    });
+    const progressMessageId = progressMessageRes.data.result.message_id;
+
     // add chatId to active chats if not already present
     activeChats.add(chatId);
 
@@ -115,6 +121,15 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         // cache the latest threadId for this chat
         chatThreads.set(chatId, apiRes.data.threadId);
         await sendNotification(chatId, apiRes.data.response);
+        try {
+          await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage`, {
+            chat_id: chatId,
+            message_id: progressMessageId,
+          });
+        }
+        catch (e) {
+          console.warn("Failed to delete progress message:", e.message);
+        }
       }
       catch (error) {
         console.warn("Webhook processRequest error:", error);
