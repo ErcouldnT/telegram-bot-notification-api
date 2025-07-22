@@ -40,6 +40,8 @@ async function sendNotification(chatId, text) {
     await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
       text,
+      parse_mode: "HTML",
+      disable_web_page_preview: false,
     });
     return { ok: true };
   }
