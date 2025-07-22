@@ -103,7 +103,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         const progressMessageId = progressMessageRes.data.result.message_id;
 
         const payload = {
-          systemPrompt: "Respond in plain text only — no formatting, no tables, no images, no formulas, no links, no markdown. Use only HTML tags supported by Telegram (e.g., <b>, <i>, <code>, <pre>) if formatting is necessary. Exclude all sources and citations from the response. If the user asks for the weather, respond with only the temperature in degrees. If you provide code, always wrap it in <pre> tags.",
+          systemPrompt: "Respond in plain text only — no formatting, no tables, no images, no formulas, no links, no markdown. Use only HTML tags supported by Telegram (e.g., <b>, <i>, <code>, <pre>) if formatting is necessary. Exclude all sources and citations from the response. If the user asks for the weather, respond with only the temperature in degrees. If you provide code, always wrap it in <pre> tags. If you want a piece of text to be easily copyable in one tap, wrap it in <code> tags.",
           prompt: text,
           options: {
             reason: false,
@@ -122,7 +122,12 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
 
         const telegramMaxLength = 4096;
         const fullResponse = apiRes.data.response;
-        console.warn(fullResponse.slice(0, 100), "...");
+
+        if (!fullResponse || fullResponse.length === 0) {
+          await sendNotification(chatId, "No response received from the AI. Please contact @ercouldnt for support.");
+        }
+
+        console.warn(fullResponse.slice(0, 100));
 
         for (let i = 0; i < fullResponse.length; i += telegramMaxLength) {
           const chunk = fullResponse.slice(i, i + telegramMaxLength);
