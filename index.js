@@ -103,8 +103,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         const progressMessageId = progressMessageRes.data.result.message_id;
 
         const payload = {
-          // systemPrompt: "Respond using only and only plain text—no formatting, no tables, no images, no formulas, no links, no markdown, no HTML. Just pure plain text. Exclude all sources and links mentioned anywhere in the response.",
-          systemPrompt: "Prompt'uma vereceğin cevabı sadece Telegram HTML Parser ile işleyebilecek şekilde ver.",
+          systemPrompt: "Respond in plain text only — no formatting, no tables, no images, no formulas, no links, no markdown. Use only HTML tags supported by Telegram (e.g., <b>, <i>, <code>) if formatting is necessary. Exclude all sources and citations from the response.",
           prompt: text,
           options: {
             reason: false,
@@ -120,8 +119,17 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         });
         // cache the latest threadId for this chat
         chatThreads.set(chatId, apiRes.data.threadId);
-        await sendNotification(chatId, apiRes.data.response);
 
+        console.warn(apiRes.data);
+
+        const telegramMaxLength = 4096;
+        const fullResponse = apiRes.data.response;
+        for (let i = 0; i < fullResponse.length; i += telegramMaxLength) {
+          const chunk = fullResponse.slice(i, i + telegramMaxLength);
+          await sendNotification(chatId, chunk);
+        }
+
+        // delete the progress message
         await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage`, {
           chat_id: chatId,
           message_id: progressMessageId,
