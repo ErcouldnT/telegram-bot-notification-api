@@ -4,6 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import helmet from "helmet";
+import { createClient } from "redis";
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ const CHAT_ID = process.env.CHAT_ID;
 const ERKUT_API_KEY = process.env.ERKUT_API_KEY;
 const SECRET_TOKEN = process.env.SECRET_TOKEN;
 const WEBHOOK_PATH = process.env.WEBHOOK_PATH || "webhook";
+const REDIS_URL = process.env.REDIS_URL;
 
 // choose GPT endpoint based on environment
 const GPT_BASE_URL
@@ -25,14 +27,13 @@ const GPT_BASE_URL
     ? "http://localhost:3001"
     : "https://gpt.erkut.dev";
 
-// stores chatId ➜ threadId pairs across requests
-const chatThreads = new Map();
-// stores threadId ➜ promise chain for sequential processing
+// redis client setup
+const redis = createClient({ url: REDIS_URL });
+redis.on("error", err => console.error("Redis Client Error", err));
+await redis.connect();
+
+// stores threadId ➜ promise chain for sequential processing (remains in-memory)
 const threadQueues = new Map();
-// stores threadId ➜ queue length
-const threadQueueLengths = new Map();
-// queue for active chats in webhook
-const activeChats = new Set();
 
 // notify function
 async function sendNotification(chatId, text) {
@@ -83,15 +84,16 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     const text = update.message.text;
 
     // add chatId to active chats if not already present
-    activeChats.add(chatId);
+    await redis.sAdd("active_chats", String(chatId));
+    const activeChatsCount = await redis.sCard("active_chats");
 
-    if (activeChats.size >= 3) {
-      const queueMsg = `There are currently ${activeChats.size} people using this app at the moment. Since there are more users, my response may be slightly delayed. Be patient, I will respond as soon as possible 🙂`;
+    if (activeChatsCount >= 3) {
+      const queueMsg = `There are currently ${activeChatsCount} people using this app at the moment. Since there are more users, my response may be slightly delayed. Be patient, I will respond as soon as possible 🙂`;
       await sendNotification(chatId, queueMsg);
     }
 
     // retrieve existing threadId for this chat if we have one
-    const threadId = chatThreads.get(chatId);
+    const threadId = await redis.hGet("chat_threads", String(chatId));
 
     // function to handle the actual processing logic
     const processRequest = async () => {
@@ -118,7 +120,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
           headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
         });
         // cache the latest threadId for this chat
-        chatThreads.set(chatId, apiRes.data.threadId);
+        await redis.hSet("chat_threads", String(chatId), apiRes.data.threadId);
 
         const telegramMaxLength = 4096;
         const fullResponse = apiRes.data.response;
@@ -148,27 +150,28 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     // if threadId exists, queue the request for that thread
     if (threadId) {
       // max queue length is 3 for each thread
-      const queueLength = threadQueueLengths.get(threadId) || 0;
+      const queueLength = Number(await redis.hGet("thread_queue_lengths", threadId)) || 0;
       if (queueLength >= 3) {
         await sendNotification(chatId, "There are too many requests from you. Please wait for previous operations to complete before sending new messages 👹");
         return;
       }
 
       const prev = threadQueues.get(threadId) || Promise.resolve();
-      threadQueueLengths.set(threadId, queueLength + 1);
-      const next = prev.then(() => processRequest()).finally(() => {
+      await redis.hSet("thread_queue_lengths", threadId, queueLength + 1);
+
+      const next = prev.then(() => processRequest()).finally(async () => {
         // when the job is done, remove it from the queue
-        const currentLength = threadQueueLengths.get(threadId) || 1;
+        const currentLength = Number(await redis.hGet("thread_queue_lengths", threadId)) || 1;
         if (currentLength <= 1) {
-          threadQueueLengths.delete(threadId);
+          await redis.hDel("thread_queue_lengths", threadId);
         }
         else {
-          threadQueueLengths.set(threadId, currentLength - 1);
+          await redis.hSet("thread_queue_lengths", threadId, currentLength - 1);
         }
         // Remove the queue if this was the last job
         if (threadQueues.get(threadId) === next) {
           threadQueues.delete(threadId);
-          activeChats.delete(chatId);
+          await redis.sRem("active_chats", String(chatId));
         }
       });
       threadQueues.set(threadId, next);
@@ -184,7 +187,7 @@ app.get("/", (req, res) => {
   res.send("<html><body><h1>Server is up and running...</h1></body></html>");
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => {
   console.warn(`🚀 Notify + Webhook server is online!`);
   console.warn(`🌐 Listening on: http://localhost:${PORT}/`);

@@ -14,7 +14,8 @@
     "cors": "^2.8.5",
     "dotenv": "^17.0.0",
     "express": "^5.1.0",
-    "helmet": "^8.1.0"
+    "helmet": "^8.1.0",
+    "redis": "^5.10.0"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.16.1",

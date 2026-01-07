@@ -1,0 +1,9 @@
+# .dockerignore - files to exclude from Docker build context
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+*.md
+.vscode
+.DS_Store
