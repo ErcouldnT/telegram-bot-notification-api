@@ -21,11 +21,8 @@ const SECRET_TOKEN = process.env.SECRET_TOKEN;
 const WEBHOOK_PATH = process.env.WEBHOOK_PATH || "webhook";
 const REDIS_URL = process.env.REDIS_URL;
 
-// choose GPT endpoint based on environment
-const GPT_BASE_URL
-  = process.env.NODE_ENV === "development"
-    ? "http://localhost:3001"
-    : "https://gpt.erkut.dev";
+// GPT API endpoint
+const GPT_BASE_URL = process.env.GPT_BASE_URL;
 
 // redis client setup
 const redis = createClient({ url: REDIS_URL });

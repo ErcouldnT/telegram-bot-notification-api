@@ -5,6 +5,8 @@
   "description": "A simple API to send notification to Telegram chats using a bot.",
   "scripts": {
     "dev": "nodemon index.js",
+    "setup-webhook": "node setup-webhook.js",
+    "prestart": "node setup-webhook.js",
     "start": "node index.js",
     "lint": "eslint",
     "format": "eslint --fix"
