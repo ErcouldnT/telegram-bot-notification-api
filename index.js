@@ -23,6 +23,7 @@ const REDIS_URL = process.env.REDIS_URL;
 
 // GPT API endpoint
 const GPT_BASE_URL = process.env.GPT_BASE_URL;
+const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT;
 
 // redis client setup
 const redis = createClient({ url: REDIS_URL });
@@ -102,7 +103,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         const progressMessageId = progressMessageRes.data.result.message_id;
 
         const payload = {
-          systemPrompt: "Respond in plain text only — no formatting, no tables, no images, no formulas, no links, no markdown. Use only HTML tags supported by Telegram (e.g., <b>, <i>, <code>, <pre>) if formatting is necessary. Exclude all sources and citations from the response. If the user asks for the weather, respond with only the temperature in degrees. If you provide code, always wrap it in <pre> tags. If you want a piece of text to be easily copyable in one tap, wrap it in <code> tags.",
+          systemPrompt: SYSTEM_PROMPT,
           prompt: text,
           options: {
             reason: false,
