@@ -16,5 +16,5 @@ COPY . .
 # Expose the port the app runs on
 EXPOSE 3002
 
-# Start the application
-CMD ["node", "index.js"]
+# Start the application (runs prestart hook first for webhook setup)
+CMD ["npm", "run", "start"]
