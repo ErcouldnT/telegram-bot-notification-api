@@ -33,61 +33,36 @@ async function setupPocketBase() {
 
         try {
             console.log("Creating 'messages' collection...");
-            await pb.collections.create({
+            const collection = await pb.collections.create({
                 name: "messages",
                 type: "base",
-                schema: [
+                fields: [
                     {
                         name: "chat_id",
                         type: "text",
                         required: true,
-                        presentable: false,
-                        unique: false,
-                        options: {
-                            min: null,
-                            max: null,
-                            pattern: "",
-                        },
                     },
                     {
                         name: "role",
                         type: "select",
                         required: true,
-                        presentable: false,
-                        unique: false,
-                        options: {
-                            maxSelect: 1,
-                            values: ["user", "assistant"],
-                        },
+                        maxSelect: 1,
+                        values: ["user", "assistant"],
                     },
                     {
                         name: "content",
                         type: "text",
                         required: true,
-                        presentable: false,
-                        unique: false,
-                        options: {
-                            min: null,
-                            max: null,
-                            pattern: "",
-                        },
                     },
                     {
                         name: "thread_id",
                         type: "text",
                         required: false,
-                        presentable: false,
-                        unique: false,
-                        options: {
-                            min: null,
-                            max: null,
-                            pattern: "",
-                        },
                     },
                 ],
-                // indexes removed as they can cause issues during creation if not careful
             });
             console.log("✅ 'messages' collection created successfully.");
+            console.log("Created Fields:", JSON.stringify(collection.fields, null, 2));
         }
         catch (createErr) {
             console.error("❌ Failed to create collection:", createErr.originalError || createErr.message);
