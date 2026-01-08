@@ -58,6 +58,10 @@ async function setupPocketBase() {
                     type: "base",
                     fields: [
                         { name: "chat_id", type: "text", required: true },
+                        { name: "username", type: "text", required: false },
+                        { name: "first_name", type: "text", required: false },
+                        { name: "last_name", type: "text", required: false },
+                        { name: "language_code", type: "text", required: false },
                         { name: "system_prompt", type: "text", required: false }
                     ],
                     // Unique constraint on chat_id would be nice, but handled by logic for now

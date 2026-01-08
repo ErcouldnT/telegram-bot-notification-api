@@ -29,6 +29,8 @@ const POCKETBASE_URL = process.env.POCKETBASE_URL;
 const POCKETBASE_EMAIL = process.env.POCKETBASE_EMAIL;
 const POCKETBASE_PASSWORD = process.env.POCKETBASE_PASSWORD;
 
+const DEFAULT_SYSTEM_PROMPT_SUFFIX = "Give flirty answers only.";
+
 // redis client setup
 const redis = createClient({ url: REDIS_URL });
 redis.on("error", err => console.error("Redis Client Error", err));
@@ -99,6 +101,35 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
   if (update.message?.text) {
     const chatId = update.message.chat.id;
     const text = update.message.text;
+    const from = update.message.from;
+
+    // Sync user data to PocketBase
+    if (from) {
+      try {
+        const userData = {
+          chat_id: String(chatId),
+          username: from.username || "",
+          first_name: from.first_name || "",
+          last_name: from.last_name || "",
+          language_code: from.language_code || "",
+        };
+
+        // Try to find existing user first
+        try {
+          const record = await pb.collection("telegram_users").getFirstListItem(`chat_id="${String(chatId)}"`);
+          // Update specific fields (preserve system_prompt if exists)
+          await pb.collection("telegram_users").update(record.id, userData);
+        } catch {
+          // Create if not exists
+          await pb.collection("telegram_users").create({
+            ...userData,
+            system_prompt: DEFAULT_SYSTEM_PROMPT_SUFFIX
+          });
+        }
+      } catch (err) {
+        console.warn("⚠️ Failed to sync user data:", err.message);
+      }
+    }
 
     // handle commands
     if (text.startsWith("/")) {
@@ -137,10 +168,10 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
           // View current prompt
           try {
             const record = await pb.collection("telegram_users").getFirstListItem(`chat_id="${userId}"`);
-            const currentParams = record.system_prompt || "Give flirty answers only. (Default)";
+            const currentParams = record.system_prompt || DEFAULT_SYSTEM_PROMPT_SUFFIX + " (Default)";
             await sendNotification(chatId, `Currently using:\n<b>${currentParams}</b>`);
           } catch (e) {
-            await sendNotification(chatId, `Currently using: <b>Give flirty answers only. (Default)</b>`);
+            await sendNotification(chatId, `Currently using: <b>${DEFAULT_SYSTEM_PROMPT_SUFFIX} (Default)</b>`);
           }
           return;
         }
@@ -149,11 +180,11 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
           try {
             // find and update or delete
             const record = await pb.collection("telegram_users").getFirstListItem(`chat_id="${userId}"`);
-            await pb.collection("telegram_users").update(record.id, { system_prompt: "" });
-            await sendNotification(chatId, "✅ System prompt reset to default (Flirty mode).");
+            await pb.collection("telegram_users").update(record.id, { system_prompt: DEFAULT_SYSTEM_PROMPT_SUFFIX });
+            await sendNotification(chatId, `✅ System prompt reset to default (${DEFAULT_SYSTEM_PROMPT_SUFFIX}).`);
           } catch (e) {
             // if not found, it's already default
-            await sendNotification(chatId, "✅ System prompt is already default.");
+            await sendNotification(chatId, `✅ System prompt is already default.`);
           }
           return;
         }
@@ -242,7 +273,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         const progressMessageId = progressMessageRes.data.result.message_id;
 
         // Fetch custom system prompt
-        let systemPromptPart = "Give flirty answers only.";
+        let systemPromptPart = DEFAULT_SYSTEM_PROMPT_SUFFIX;
         try {
           const userSettings = await pb.collection("telegram_users").getFirstListItem(`chat_id="${String(chatId)}"`);
           if (userSettings.system_prompt) {
