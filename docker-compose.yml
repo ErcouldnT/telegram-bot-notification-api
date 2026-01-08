@@ -37,7 +37,7 @@ services:
     volumes:
       - pocketbase_data:/pb_data
     entrypoint: /bin/sh
-    command: -c "/usr/local/bin/pocketbase superuser upsert ${POCKETBASE_EMAIL} ${POCKETBASE_PASSWORD} && /usr/local/bin/pocketbase serve --http=0.0.0.0:8090"
+    command: -c "/usr/local/bin/pocketbase superuser upsert ${POCKETBASE_EMAIL} ${POCKETBASE_PASSWORD} --dir=/pb_data/pb_data && /usr/local/bin/pocketbase serve --http=0.0.0.0:8090 --dir=/pb_data/pb_data"
     healthcheck:
       test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8090/api/health" ]
       interval: 5s
