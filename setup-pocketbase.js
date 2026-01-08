@@ -18,12 +18,20 @@ async function setupPocketBase() {
         await pb.admins.authWithPassword(POCKETBASE_EMAIL, POCKETBASE_PASSWORD);
         console.log("✅ Authenticated as admin");
 
-        // Check if 'messages' collection exists
+        // Check if 'messages' collection exists and delete it to ensure schema is fresh
         try {
-            await pb.collections.getFirstListItem("name='messages'");
-            console.log("ℹ️ 'messages' collection already exists");
+            const result = await pb.collections.getList(1, 1, { filter: 'name="messages"' });
+            if (result.items.length > 0) {
+                console.log("ℹ️ 'messages' collection found. Deleting to ensure schema update...");
+                await pb.collections.delete(result.items[0].id);
+                console.log("✅ 'messages' collection deleted.");
+            }
         }
-        catch {
+        catch (err) {
+            console.warn("ℹ️ Collection check failed (might not exist yet):", err.message);
+        }
+
+        try {
             console.log("Creating 'messages' collection...");
             await pb.collections.create({
                 name: "messages",
@@ -77,13 +85,16 @@ async function setupPocketBase() {
                         },
                     },
                 ],
+                // indexes removed as they can cause issues during creation if not careful
             });
-            console.log("✅ 'messages' collection created created");
+            console.log("✅ 'messages' collection created successfully.");
+        }
+        catch (createErr) {
+            console.error("❌ Failed to create collection:", createErr.originalError || createErr.message);
         }
     }
     catch (error) {
         console.error("❌ Error setting up PocketBase:", error.originalError || error.message);
-        // process.exit(1); // Don't fail hard if PB is not ready yet, might be starting up
     }
 }
 
