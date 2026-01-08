@@ -54,6 +54,9 @@ catch (e) {
 // stores threadId ➜ promise chain for sequential processing (remains in-memory)
 const threadQueues = new Map();
 
+// stores mediaGroupId ➜ buffer for grouping images
+const mediaGroupBuffers = new Map();
+
 // notify function
 async function sendNotification(chatId, text) {
   try {
@@ -68,6 +71,12 @@ async function sendNotification(chatId, text) {
   catch (e) {
     return { error: e.message };
   }
+}
+
+async function getTelegramFileUrl(fileId) {
+  const res = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const filePath = res.data.result.file_path;
+  return `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
 }
 
 // auth middleware
@@ -105,30 +114,7 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
 
     // Sync user data to PocketBase
     if (from) {
-      try {
-        const userData = {
-          chat_id: String(chatId),
-          username: from.username || "",
-          first_name: from.first_name || "",
-          last_name: from.last_name || "",
-          language_code: from.language_code || "",
-        };
-
-        // Try to find existing user first
-        try {
-          const record = await pb.collection("telegram_users").getFirstListItem(`chat_id="${String(chatId)}"`);
-          // Update specific fields (preserve system_prompt if exists)
-          await pb.collection("telegram_users").update(record.id, userData);
-        } catch {
-          // Create if not exists
-          await pb.collection("telegram_users").create({
-            ...userData,
-            system_prompt: DEFAULT_SYSTEM_PROMPT_SUFFIX
-          });
-        }
-      } catch (err) {
-        console.warn("⚠️ Failed to sync user data:", err.message);
-      }
+      await syncUser(chatId, from);
     }
 
     // handle commands
@@ -238,155 +224,226 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     }
 
     // retrieve existing threadId for this chat if we have one
-    const threadId = await redis.hGet("chat_threads", String(chatId));
+    await handleChatMessage(chatId, text, [], from);
+  } else if (update.message?.photo) {
+    const chatId = update.message.chat.id;
+    const mediaGroupId = update.message.media_group_id;
+    const caption = update.message.caption || "";
+    const from = update.message.from;
 
-    // store user message to PB
-    let userMsgRecordId = null;
-    try {
-      const record = await pb.collection("messages").create({
-        chat_id: String(chatId),
-        role: "user",
-        content: text,
-        thread_id: threadId || "",
-      });
-      userMsgRecordId = record.id;
-    }
-    catch (e) {
-    }
+    // Get the highest resolution photo
+    const fileId = update.message.photo[update.message.photo.length - 1].file_id;
+    const imageUrl = await getTelegramFileUrl(fileId);
 
-    // add chatId to active chats if not already present
-    await redis.sAdd("active_chats", String(chatId));
-    const activeChatsCount = await redis.sCard("active_chats");
-
-    if (activeChatsCount >= 3) {
-      const queueMsg = `There are currently ${activeChatsCount} people using this app at the moment. Since there are more users, my response may be slightly delayed. Be patient, I will respond as soon as possible 🙂`;
-      await sendNotification(chatId, queueMsg);
+    if (from) {
+      await syncUser(chatId, from);
     }
 
-    // function to handle the actual processing logic
-    const processRequest = async () => {
-      try {
-        const progressMessageRes = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-          chat_id: chatId,
-          text: "In process... 🧑🏻‍💻",
+    if (mediaGroupId) {
+      if (!mediaGroupBuffers.has(mediaGroupId)) {
+        mediaGroupBuffers.set(mediaGroupId, {
+          images: [],
+          caption: "",
+          chatId,
+          timer: null,
+          from: from,
         });
-        const progressMessageId = progressMessageRes.data.result.message_id;
-
-        // Fetch custom system prompt
-        let systemPromptPart = DEFAULT_SYSTEM_PROMPT_SUFFIX;
-        try {
-          const userSettings = await pb.collection("telegram_users").getFirstListItem(`chat_id="${String(chatId)}"`);
-          if (userSettings.system_prompt) {
-            systemPromptPart = userSettings.system_prompt;
-          }
-        } catch (e) { /* use default */ }
-
-        const finalSystemPrompt = `${SYSTEM_PROMPT} ${systemPromptPart}`;
-
-        const payload = {
-          systemPrompt: finalSystemPrompt,
-          prompt: text,
-          options: {
-            reason: false,
-            search: false,
-          },
-        };
-        // if this chat has a previous thread, include it
-        if (threadId) {
-          payload.options.threadId = threadId;
-        }
-        const apiRes = await axios.post(`${GPT_BASE_URL}/api/prompt`, payload, {
-          headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
-        });
-        // cache the latest threadId for this chat
-        await redis.hSet("chat_threads", String(chatId), apiRes.data.threadId);
-
-        const telegramMaxLength = 4096;
-        const fullResponse = apiRes.data.response;
-
-        if (!fullResponse || fullResponse.length === 0) {
-          await sendNotification(chatId, "No response received from the AI. Please contact @ercouldnt for support.");
-        }
-
-        console.warn(fullResponse.slice(0, 100));
-
-        for (let i = 0; i < fullResponse.length; i += telegramMaxLength) {
-          const chunk = fullResponse.slice(i, i + telegramMaxLength);
-          await sendNotification(chatId, chunk);
-        }
-
-        // delete the progress message
-        await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage`, {
-          chat_id: chatId,
-          message_id: progressMessageId,
-        });
-
-        // store AI response to PB
-        try {
-          const newThreadId = apiRes.data.threadId;
-
-          await pb.collection("messages").create({
-            chat_id: String(chatId),
-            role: "assistant",
-            content: fullResponse,
-            thread_id: threadId || newThreadId,
-          });
-
-          // if we didn't have a threadId before (it was the first message), update the user message
-          if (!threadId && userMsgRecordId) {
-            try {
-              await pb.collection("messages").update(userMsgRecordId, {
-                thread_id: newThreadId
-              });
-            } catch (updateErr) {
-              console.warn("Failed to backfill thread_id for user msg:", updateErr.message);
-            }
-          }
-        }
-        catch (e) {
-          console.warn("PB assistant msg save error:", e.message);
-        }
       }
-      catch (error) {
-        console.warn("Webhook processRequest error:", error);
-      }
-    };
+      const buffer = mediaGroupBuffers.get(mediaGroupId);
+      buffer.images.push(imageUrl);
+      if (caption) buffer.caption = caption;
 
-    // if threadId exists, queue the request for that thread
-    if (threadId) {
-      // max queue length is 3 for each thread
-      const queueLength = Number(await redis.hGet("thread_queue_lengths", threadId)) || 0;
-      if (queueLength >= 3) {
-        await sendNotification(chatId, "There are too many requests from you. Please wait for previous operations to complete before sending new messages 👹");
-        return;
-      }
-
-      const prev = threadQueues.get(threadId) || Promise.resolve();
-      await redis.hSet("thread_queue_lengths", threadId, queueLength + 1);
-
-      const next = prev.then(() => processRequest()).finally(async () => {
-        // when the job is done, remove it from the queue
-        const currentLength = Number(await redis.hGet("thread_queue_lengths", threadId)) || 1;
-        if (currentLength <= 1) {
-          await redis.hDel("thread_queue_lengths", threadId);
+      if (buffer.timer) clearTimeout(buffer.timer);
+      buffer.timer = setTimeout(async () => {
+        const finalBuffer = mediaGroupBuffers.get(mediaGroupId);
+        if (finalBuffer) {
+          mediaGroupBuffers.delete(mediaGroupId);
+          await handleChatMessage(finalBuffer.chatId, finalBuffer.caption || "What is in these images?", finalBuffer.images, finalBuffer.from);
         }
-        else {
-          await redis.hSet("thread_queue_lengths", threadId, currentLength - 1);
-        }
-        // Remove the queue if this was the last job
-        if (threadQueues.get(threadId) === next) {
-          threadQueues.delete(threadId);
-          await redis.sRem("active_chats", String(chatId));
-        }
-      });
-      threadQueues.set(threadId, next);
-    }
-    else {
-      // No threadId, just process immediately
-      processRequest();
+      }, 1500); // 1.5s wait for all photos in media group
+    } else {
+      await handleChatMessage(chatId, caption || "What is in this image?", [imageUrl], from);
     }
   }
 });
+
+async function syncUser(chatId, from) {
+  try {
+    const userData = {
+      chat_id: String(chatId),
+      username: from.username || "",
+      first_name: from.first_name || "",
+      last_name: from.last_name || "",
+      language_code: from.language_code || "",
+    };
+
+    // Try to find existing user first
+    try {
+      const record = await pb.collection("telegram_users").getFirstListItem(`chat_id="${String(chatId)}"`);
+      // Update specific fields (preserve system_prompt if exists)
+      await pb.collection("telegram_users").update(record.id, userData);
+    } catch {
+      // Create if not exists
+      await pb.collection("telegram_users").create({
+        ...userData,
+        system_prompt: DEFAULT_SYSTEM_PROMPT_SUFFIX
+      });
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to sync user data:", err.message);
+  }
+}
+
+async function handleChatMessage(chatId, text, images = [], from) {
+  const threadId = await redis.hGet("chat_threads", String(chatId));
+
+  // store user message to PB
+  let userMsgRecordId = null;
+  try {
+    const record = await pb.collection("messages").create({
+      chat_id: String(chatId),
+      role: "user",
+      content: text,
+      thread_id: threadId || "",
+    });
+    userMsgRecordId = record.id;
+  }
+  catch (e) {
+  }
+
+  // add chatId to active chats if not already present
+  await redis.sAdd("active_chats", String(chatId));
+  const activeChatsCount = await redis.sCard("active_chats");
+
+  if (activeChatsCount >= 3) {
+    const queueMsg = `There are currently ${activeChatsCount} people using this app at the moment. Since there are more users, my response may be slightly delayed. Be patient, I will respond as soon as possible 🙂`;
+    await sendNotification(chatId, queueMsg);
+  }
+
+  // function to handle the actual processing logic
+  const processRequest = async () => {
+    try {
+      const progressMessageRes = await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        chat_id: chatId,
+        text: "In process... 🧑🏻‍💻",
+      });
+      const progressMessageId = progressMessageRes.data.result.message_id;
+
+      // Fetch custom system prompt
+      let systemPromptPart = DEFAULT_SYSTEM_PROMPT_SUFFIX;
+      try {
+        const userSettings = await pb.collection("telegram_users").getFirstListItem(`chat_id="${String(chatId)}"`);
+        if (userSettings.system_prompt) {
+          systemPromptPart = userSettings.system_prompt;
+        }
+      } catch (e) { /* use default */ }
+
+      const finalSystemPrompt = `${SYSTEM_PROMPT} ${systemPromptPart}`;
+
+      const payload = {
+        systemPrompt: finalSystemPrompt,
+        prompt: text,
+        images: images.length > 0 ? images : undefined,
+        options: {
+          reason: false,
+          search: false,
+        },
+      };
+      // if this chat has a previous thread, include it
+      if (threadId) {
+        payload.options.threadId = threadId;
+      }
+      const apiRes = await axios.post(`${GPT_BASE_URL}/api/prompt`, payload, {
+        headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
+      });
+      // cache the latest threadId for this chat
+      await redis.hSet("chat_threads", String(chatId), apiRes.data.threadId);
+
+      const telegramMaxLength = 4096;
+      const fullResponse = apiRes.data.response;
+
+      if (!fullResponse || fullResponse.length === 0) {
+        await sendNotification(chatId, "No response received from the AI. Please contact @ercouldnt for support.");
+      }
+
+      console.warn(fullResponse.slice(0, 100));
+
+      for (let i = 0; i < fullResponse.length; i += telegramMaxLength) {
+        const chunk = fullResponse.slice(i, i + telegramMaxLength);
+        await sendNotification(chatId, chunk);
+      }
+
+      // delete the progress message
+      await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage`, {
+        chat_id: chatId,
+        message_id: progressMessageId,
+      });
+
+      // store AI response to PB
+      try {
+        const newThreadId = apiRes.data.threadId;
+
+        await pb.collection("messages").create({
+          chat_id: String(chatId),
+          role: "assistant",
+          content: fullResponse,
+          thread_id: threadId || newThreadId,
+        });
+
+        // if we didn't have a threadId before (it was the first message), update the user message
+        if (!threadId && userMsgRecordId) {
+          try {
+            await pb.collection("messages").update(userMsgRecordId, {
+              thread_id: newThreadId
+            });
+          } catch (updateErr) {
+            console.warn("Failed to backfill thread_id for user msg:", updateErr.message);
+          }
+        }
+      }
+      catch (e) {
+        console.warn("PB assistant msg save error:", e.message);
+      }
+    }
+    catch (error) {
+      console.warn("Webhook processRequest error:", error);
+    }
+  };
+
+  // if threadId exists, queue the request for that thread
+  if (threadId) {
+    // max queue length is 3 for each thread
+    const queueLength = Number(await redis.hGet("thread_queue_lengths", threadId)) || 0;
+    if (queueLength >= 3) {
+      await sendNotification(chatId, "There are too many requests from you. Please wait for previous operations to complete before sending new messages 👹");
+      return;
+    }
+
+    const prev = threadQueues.get(threadId) || Promise.resolve();
+    await redis.hSet("thread_queue_lengths", threadId, queueLength + 1);
+
+    const next = prev.then(() => processRequest()).finally(async () => {
+      // when the job is done, remove it from the queue
+      const currentLength = Number(await redis.hGet("thread_queue_lengths", threadId)) || 1;
+      if (currentLength <= 1) {
+        await redis.hDel("thread_queue_lengths", threadId);
+      }
+      else {
+        await redis.hSet("thread_queue_lengths", threadId, currentLength - 1);
+      }
+      // Remove the queue if this was the last job
+      if (threadQueues.get(threadId) === next) {
+        threadQueues.delete(threadId);
+        await redis.sRem("active_chats", String(chatId));
+      }
+    });
+    threadQueues.set(threadId, next);
+  }
+  else {
+    // No threadId, just process immediately
+    processRequest();
+  }
+}
 
 app.get("/", (req, res) => {
   res.send("<html><body><h1>Server is up and running...</h1></body></html>");
