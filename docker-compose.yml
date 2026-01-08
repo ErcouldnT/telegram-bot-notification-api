@@ -6,10 +6,13 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
+      - POCKETBASE_URL=http://pocketbase:8090
     env_file:
       - .env
     depends_on:
       redis:
+        condition: service_healthy
+      pocketbase:
         condition: service_healthy
     restart: unless-stopped
 
@@ -27,5 +30,21 @@ services:
       retries: 5
     restart: unless-stopped
 
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    ports:
+      - "8090:8090"
+    volumes:
+      - pocketbase_data:/pb_data
+    entrypoint: /bin/sh
+    command: -c "/usr/local/bin/pocketbase superuser upsert ${POCKETBASE_EMAIL} ${POCKETBASE_PASSWORD} && /usr/local/bin/pocketbase serve --http=0.0.0.0:8090"
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8090/api/health" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   redis_data:
+  pocketbase_data:

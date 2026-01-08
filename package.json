@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon index.js",
     "setup-webhook": "node setup-webhook.js",
-    "prestart": "node setup-webhook.js",
+    "setup-pocketbase": "node setup-pocketbase.js",
+    "prestart": "node setup-webhook.js && node setup-pocketbase.js",
     "start": "node index.js",
     "lint": "eslint",
     "format": "eslint --fix"
@@ -17,6 +18,7 @@
     "dotenv": "^17.0.0",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
+    "pocketbase": "^0.26.5",
     "redis": "^5.10.0"
   },
   "devDependencies": {

@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import express from "express";
 import helmet from "helmet";
 import { createClient } from "redis";
+import PocketBase from "pocketbase";
 
 dotenv.config();
 
@@ -24,11 +25,29 @@ const REDIS_URL = process.env.REDIS_URL;
 // GPT API endpoint
 const GPT_BASE_URL = process.env.GPT_BASE_URL;
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT;
+const POCKETBASE_URL = process.env.POCKETBASE_URL;
+const POCKETBASE_EMAIL = process.env.POCKETBASE_EMAIL;
+const POCKETBASE_PASSWORD = process.env.POCKETBASE_PASSWORD;
 
 // redis client setup
 const redis = createClient({ url: REDIS_URL });
 redis.on("error", err => console.error("Redis Client Error", err));
 await redis.connect();
+
+// PB client setup
+const pb = new PocketBase(POCKETBASE_URL);
+// disable auto cancellation to allow concurrent requests
+pb.autoCancellation(false);
+
+// authenticate PB as admin (needed to write to 'messages' collection)
+// in a real app you might use a specific bot user, but admin is fine for this
+try {
+  await pb.admins.authWithPassword(POCKETBASE_EMAIL, POCKETBASE_PASSWORD);
+  console.log("✅ PocketBase admin authenticated");
+}
+catch (e) {
+  console.warn("⚠️ PocketBase auth failed:", e.message);
+}
 
 // stores threadId ➜ promise chain for sequential processing (remains in-memory)
 const threadQueues = new Map();
@@ -80,6 +99,77 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
   if (update.message?.text) {
     const chatId = update.message.chat.id;
     const text = update.message.text;
+
+    // handle commands
+    if (text.startsWith("/")) {
+      const command = text.split(" ")[0];
+
+      if (command === "/start") {
+        await sendNotification(chatId, "Hello! I am ready to help you. Just send me a message. 🤖");
+        return;
+      }
+
+      if (command === "/help") {
+        const helpText = `
+<b>Available Commands:</b>
+/start - Start conversation
+/clear - Clear conversation history context
+/history - Show last 10 messages
+/help - Show this help message
+        `;
+        await sendNotification(chatId, helpText);
+        return;
+      }
+
+      if (command === "/clear") {
+        await redis.hDel("chat_threads", String(chatId));
+        await sendNotification(chatId, "Conversation context cleared. Starting fresh! 🧹");
+        return;
+      }
+
+      if (command === "/history") {
+        try {
+          const records = await pb.collection("messages").getList(1, 10, {
+            filter: `chat_id = "${chatId}"`,
+            sort: "-created",
+          });
+
+          if (records.items.length === 0) {
+            await sendNotification(chatId, "No history found.");
+            return;
+          }
+
+          let historyMsg = "<b>Last 10 messages:</b>\n\n";
+          // reverse to show chronological order
+          const reversed = records.items.reverse();
+
+          for (const msg of reversed) {
+            const roleIcon = msg.role === "user" ? "👤" : "🤖";
+            // truncate long messages
+            const content = msg.content.length > 50 ? msg.content.substring(0, 50) + "..." : msg.content;
+            historyMsg += `${roleIcon} <b>${msg.role}:</b> ${content}\n`;
+          }
+          await sendNotification(chatId, historyMsg);
+        }
+        catch (e) {
+          console.error("History error:", e);
+          await sendNotification(chatId, "Failed to fetch history.");
+        }
+        return;
+      }
+    }
+
+    // store user message to PB
+    try {
+      await pb.collection("messages").create({
+        chat_id: String(chatId),
+        role: "user",
+        content: text,
+      });
+    }
+    catch (e) {
+      console.warn("PB user msg save error:", e.message);
+    }
 
     // add chatId to active chats if not already present
     await redis.sAdd("active_chats", String(chatId));
@@ -139,6 +229,19 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
           chat_id: chatId,
           message_id: progressMessageId,
         });
+
+        // store AI response to PB
+        try {
+          await pb.collection("messages").create({
+            chat_id: String(chatId),
+            role: "assistant",
+            content: fullResponse,
+            thread_id: threadId || apiRes.data.threadId,
+          });
+        }
+        catch (e) {
+          console.warn("PB assistant msg save error:", e.message);
+        }
       }
       catch (error) {
         console.warn("Webhook processRequest error:", error);
