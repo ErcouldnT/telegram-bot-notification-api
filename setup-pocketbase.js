@@ -59,6 +59,17 @@ async function setupPocketBase() {
                         type: "text",
                         required: false,
                     },
+                    {
+                        name: "created",
+                        type: "autodate",
+                        onCreate: true,
+                    },
+                    {
+                        name: "updated",
+                        type: "autodate",
+                        onCreate: true,
+                        onUpdate: true,
+                    },
                 ],
             });
             console.log("✅ 'messages' collection created successfully.");
