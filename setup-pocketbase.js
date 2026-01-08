@@ -18,13 +18,12 @@ async function setupPocketBase() {
         await pb.admins.authWithPassword(POCKETBASE_EMAIL, POCKETBASE_PASSWORD);
         console.log("✅ Authenticated as admin");
 
-        // Check if 'messages' collection exists and delete it to ensure schema is fresh
+        // Check if 'messages' collection exists
         try {
             const result = await pb.collections.getList(1, 1, { filter: 'name="messages"' });
             if (result.items.length > 0) {
-                console.log("ℹ️ 'messages' collection found. Deleting to ensure schema update...");
-                await pb.collections.delete(result.items[0].id);
-                console.log("✅ 'messages' collection deleted.");
+                console.log("ℹ️ 'messages' collection already exists. Skipping creation.");
+                return;
             }
         }
         catch (err) {

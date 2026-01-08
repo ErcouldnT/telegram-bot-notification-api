@@ -159,16 +159,21 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
       }
     }
 
+    // retrieve existing threadId for this chat if we have one
+    const threadId = await redis.hGet("chat_threads", String(chatId));
+
     // store user message to PB
+    let userMsgRecordId = null;
     try {
-      await pb.collection("messages").create({
+      const record = await pb.collection("messages").create({
         chat_id: String(chatId),
         role: "user",
         content: text,
+        thread_id: threadId || "",
       });
+      userMsgRecordId = record.id;
     }
     catch (e) {
-      console.warn("PB user msg save error:", e.message);
     }
 
     // add chatId to active chats if not already present
@@ -179,9 +184,6 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
       const queueMsg = `There are currently ${activeChatsCount} people using this app at the moment. Since there are more users, my response may be slightly delayed. Be patient, I will respond as soon as possible 🙂`;
       await sendNotification(chatId, queueMsg);
     }
-
-    // retrieve existing threadId for this chat if we have one
-    const threadId = await redis.hGet("chat_threads", String(chatId));
 
     // function to handle the actual processing logic
     const processRequest = async () => {
@@ -232,12 +234,25 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
 
         // store AI response to PB
         try {
+          const newThreadId = apiRes.data.threadId;
+
           await pb.collection("messages").create({
             chat_id: String(chatId),
             role: "assistant",
             content: fullResponse,
-            thread_id: threadId || apiRes.data.threadId,
+            thread_id: threadId || newThreadId,
           });
+
+          // if we didn't have a threadId before (it was the first message), update the user message
+          if (!threadId && userMsgRecordId) {
+            try {
+              await pb.collection("messages").update(userMsgRecordId, {
+                thread_id: newThreadId
+              });
+            } catch (updateErr) {
+              console.warn("Failed to backfill thread_id for user msg:", updateErr.message);
+            }
+          }
         }
         catch (e) {
           console.warn("PB assistant msg save error:", e.message);
