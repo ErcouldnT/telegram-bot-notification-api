@@ -264,6 +264,17 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
     } else {
       await handleChatMessage(chatId, caption || "What is in this image?", [imageUrl], from);
     }
+  } else if (update.message?.document && update.message.document.mime_type?.startsWith("image/")) {
+    const chatId = update.message.chat.id;
+    const caption = update.message.caption || "";
+    const from = update.message.from;
+    const fileId = update.message.document.file_id;
+    const imageUrl = await getTelegramFileUrl(fileId);
+
+    if (from) {
+      await syncUser(chatId, from);
+    }
+    await handleChatMessage(chatId, caption || "What is in this image?", [imageUrl], from);
   }
 });
 
@@ -349,13 +360,36 @@ async function handleChatMessage(chatId, text, images = [], from) {
           search: false,
         },
       };
+      console.log(`📡 Sending to GPT for chat ${chatId}: Prompt="${text}", Images=${images.length}`);
+
       // if this chat has a previous thread, include it
       if (threadId) {
         payload.options.threadId = threadId;
       }
-      const apiRes = await axios.post(`${GPT_BASE_URL}/api/prompt`, payload, {
-        headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
-      });
+
+      let apiRes;
+      let retries = 0;
+      const maxRetries = 3;
+
+      while (retries <= maxRetries) {
+        apiRes = await axios.post(`${GPT_BASE_URL}/api/prompt`, payload, {
+          headers: { "ERKUT-API-KEY": ERKUT_API_KEY },
+        });
+
+        if (apiRes.data.response === "Analyzing image" && retries < maxRetries) {
+          retries++;
+          console.warn(`⏳ Image analysis in progress for chat ${chatId} (attempt ${retries}). Waiting 10s...`);
+          // use the threadId from the partial response for polling
+          if (apiRes.data.threadId) {
+            payload.options.threadId = apiRes.data.threadId;
+            delete payload.images; // No need to send images again for polling
+          }
+          await new Promise(resolve => setTimeout(resolve, 10000));
+          continue;
+        }
+        break;
+      }
+
       // cache the latest threadId for this chat
       await redis.hSet("chat_threads", String(chatId), apiRes.data.threadId);
 
