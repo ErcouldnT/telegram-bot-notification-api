@@ -18,67 +18,57 @@ async function setupPocketBase() {
         await pb.admins.authWithPassword(POCKETBASE_EMAIL, POCKETBASE_PASSWORD);
         console.log("✅ Authenticated as admin");
 
-        // Check if 'messages' collection exists
+        // --- Collections Setup ---
+
+        // 1. Messages Collection
         try {
             const result = await pb.collections.getList(1, 1, { filter: 'name="messages"' });
             if (result.items.length > 0) {
                 console.log("ℹ️ 'messages' collection already exists. Skipping creation.");
-                return;
+            } else {
+                console.log("Creating 'messages' collection...");
+                const collection = await pb.collections.create({
+                    name: "messages",
+                    type: "base",
+                    fields: [
+                        { name: "chat_id", type: "text", required: true },
+                        { name: "role", type: "select", required: true, maxSelect: 1, values: ["user", "assistant"] },
+                        { name: "content", type: "text", required: true },
+                        { name: "thread_id", type: "text", required: false },
+                        { name: "created", type: "autodate", onCreate: true },
+                        { name: "updated", type: "autodate", onCreate: true, onUpdate: true },
+                    ],
+                });
+                console.log("✅ 'messages' collection created successfully.");
+                console.log("Created Fields:", JSON.stringify(collection.fields, null, 2));
             }
-        }
-        catch (err) {
-            console.warn("ℹ️ Collection check failed (might not exist yet):", err.message);
+        } catch (err) {
+            console.error("❌ Failed to setup 'messages' collection:", err.originalError || err.message);
         }
 
+        // 2. Telegram Users Collection
         try {
-            console.log("Creating 'messages' collection...");
-            const collection = await pb.collections.create({
-                name: "messages",
-                type: "base",
-                fields: [
-                    {
-                        name: "chat_id",
-                        type: "text",
-                        required: true,
-                    },
-                    {
-                        name: "role",
-                        type: "select",
-                        required: true,
-                        maxSelect: 1,
-                        values: ["user", "assistant"],
-                    },
-                    {
-                        name: "content",
-                        type: "text",
-                        required: true,
-                    },
-                    {
-                        name: "thread_id",
-                        type: "text",
-                        required: false,
-                    },
-                    {
-                        name: "created",
-                        type: "autodate",
-                        onCreate: true,
-                    },
-                    {
-                        name: "updated",
-                        type: "autodate",
-                        onCreate: true,
-                        onUpdate: true,
-                    },
-                ],
-            });
-            console.log("✅ 'messages' collection created successfully.");
-            console.log("Created Fields:", JSON.stringify(collection.fields, null, 2));
+            const result = await pb.collections.getList(1, 1, { filter: 'name="telegram_users"' });
+            if (result.items.length > 0) {
+                console.log("ℹ️ 'telegram_users' collection already exists. Skipping creation.");
+            } else {
+                console.log("Creating 'telegram_users' collection...");
+                await pb.collections.create({
+                    name: "telegram_users",
+                    type: "base",
+                    fields: [
+                        { name: "chat_id", type: "text", required: true },
+                        { name: "system_prompt", type: "text", required: false }
+                    ],
+                    // Unique constraint on chat_id would be nice, but handled by logic for now
+                });
+                console.log("✅ 'telegram_users' collection created successfully.");
+            }
+        } catch (err) {
+            console.error("❌ Failed to setup 'telegram_users' collection:", err.originalError || err.message);
         }
-        catch (createErr) {
-            console.error("❌ Failed to create collection:", createErr.originalError || createErr.message);
-        }
-    }
-    catch (error) {
+
+    } catch (error) {
         console.error("❌ Error setting up PocketBase:", error.originalError || error.message);
     }
 }

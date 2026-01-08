@@ -114,7 +114,8 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
 <b>Available Commands:</b>
 /start - Start conversation
 /clear - Clear conversation history context
-/history - Show last 10 messages
+/system - View/Set system prompt
+/system reset - Reset system prompt
 /help - Show this help message
         `;
         await sendNotification(chatId, helpText);
@@ -124,6 +125,52 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
       if (command === "/clear") {
         await redis.hDel("chat_threads", String(chatId));
         await sendNotification(chatId, "Conversation context cleared. Starting fresh! 🧹");
+        return;
+      }
+
+
+      if (command.startsWith("/system")) {
+        const args = text.slice(7).trim(); // remove "/system"
+        const userId = String(chatId);
+
+        if (!args) {
+          // View current prompt
+          try {
+            const record = await pb.collection("telegram_users").getFirstListItem(`chat_id="${userId}"`);
+            const currentParams = record.system_prompt || "Give flirty answers only. (Default)";
+            await sendNotification(chatId, `Currently using:\n<b>${currentParams}</b>`);
+          } catch (e) {
+            await sendNotification(chatId, `Currently using: <b>Give flirty answers only. (Default)</b>`);
+          }
+          return;
+        }
+
+        if (args === "reset") {
+          try {
+            // find and update or delete
+            const record = await pb.collection("telegram_users").getFirstListItem(`chat_id="${userId}"`);
+            await pb.collection("telegram_users").update(record.id, { system_prompt: "" });
+            await sendNotification(chatId, "✅ System prompt reset to default (Flirty mode).");
+          } catch (e) {
+            // if not found, it's already default
+            await sendNotification(chatId, "✅ System prompt is already default.");
+          }
+          return;
+        }
+
+        // Set custom prompt
+        try {
+          try {
+            const record = await pb.collection("telegram_users").getFirstListItem(`chat_id="${userId}"`);
+            await pb.collection("telegram_users").update(record.id, { system_prompt: args });
+          } catch {
+            await pb.collection("telegram_users").create({ chat_id: userId, system_prompt: args });
+          }
+          await sendNotification(chatId, `✅ Custom prompt set to:\n"<b>${args}</b>"`);
+        } catch (e) {
+          console.error(e);
+          await sendNotification(chatId, "❌ Failed to set custom prompt.");
+        }
         return;
       }
 
@@ -194,8 +241,19 @@ app.post(`/${WEBHOOK_PATH}`, async (req, res) => {
         });
         const progressMessageId = progressMessageRes.data.result.message_id;
 
+        // Fetch custom system prompt
+        let systemPromptPart = "Give flirty answers only.";
+        try {
+          const userSettings = await pb.collection("telegram_users").getFirstListItem(`chat_id="${String(chatId)}"`);
+          if (userSettings.system_prompt) {
+            systemPromptPart = userSettings.system_prompt;
+          }
+        } catch (e) { /* use default */ }
+
+        const finalSystemPrompt = `${SYSTEM_PROMPT} ${systemPromptPart}`;
+
         const payload = {
-          systemPrompt: SYSTEM_PROMPT,
+          systemPrompt: finalSystemPrompt,
           prompt: text,
           options: {
             reason: false,
